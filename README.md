@@ -18,13 +18,13 @@ This program finds an icon on the Windows 11 desktop from a screenshot and a tex
 uv sync
 ```
 
-Set your API key for the current PowerShell window:
+The program needs an Anthropic API key. The quickest way is to set it for the current PowerShell window (it is forgotten when you close the window):
 
 ```powershell
-$env:ANTHROPIC_API_KEY = "sk-ant-..."
+$env:ANTHROPIC_API_KEY = "your-key-here"
 ```
 
-Or put `ANTHROPIC_API_KEY=sk-ant-...` in a file named `.env` in the repository root (it is gitignored and must never be committed).
+Alternatively, create a file named `.env` in the project folder containing `ANTHROPIC_API_KEY=your-key-here`. The file is listed in `.gitignore`, so it won't be committed. Never commit your key.
 
 If `uv sync` fails with a hardlink error on Windows, run `$env:UV_LINK_MODE = "copy"` and try again.
 
