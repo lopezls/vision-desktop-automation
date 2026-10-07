@@ -50,8 +50,16 @@ def move(p: Point) -> None:
     pyautogui.moveTo(x, y, duration=0.2)
 
 
-def type_text(text: str, interval: float = TYPE_INTERVAL) -> None:
-    pyautogui.write(text, interval=interval)
+def type_text(text: str, interval: float = TYPE_INTERVAL, pause: bool = True) -> None:
+    """Type text key by key. `pause=False` skips pyautogui's 0.1s after-call pause (used when typing many
+    short chunks, each followed by a read-back that provides the settling time). The failsafe stays on."""
+    pyautogui.write(text, interval=interval, _pause=pause)
+
+
+def press_repeated(key: str, n: int, interval: float = 0.02) -> None:
+    """Press one key n times (cursor movement / Backspace), failsafe on."""
+    if n > 0:
+        pyautogui.press(key, presses=n, interval=interval, _pause=False)
 
 
 def press(*keys: str) -> None:

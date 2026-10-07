@@ -50,6 +50,18 @@ class Config:
     # --- desktop workflow (step 8): every wait polls for a condition, these are only the give-up times ---
     launch_timeout_s: float = 20.0  # double-click -> a new Notepad window appears
     dialog_timeout_s: float = 10.0  # Save As / overwrite confirmation dialogs
+    # Saving does not rest on one keystroke: the File name box is verified, Enter is tried first and, if the
+    # dialog is still open save_confirm_wait_s later, Alt+S (the Save button accelerator); bounded in total.
+    focus_timeout_s: float = 3.0  # waiting for a window to take the keyboard focus before sending keys
+    # Typing is verified against the editor's own text after every word (Notepad's autocorrect can rewrite a
+    # word, e.g. "commodi" -> "commode", and typing it again would give the same result).
+    chunk_retries: int = 2  # repairs per word before the whole document is cleared and typed again
+    type_retries: int = 2  # clear (Ctrl+A, Delete) and re-type the whole document this many times, then stop
+    chunk_settle_s: float = 0.04  # pause after a word before reading the editor back
+    save_attempts: int = 3  # confirmations: Enter, then Alt+S, then Alt+S again
+    save_confirm_wait_s: float = 1.5  # how long to wait for the dialog to respond to each confirmation
+    field_retries: int = 2  # re-type attempts if the File name box does not hold exactly the path
+    field_read_timeout_s: float = 1.5  # how long to wait for the box to show the typed path
     close_timeout_s: float = 10.0  # Notepad window disappears after closing
     desktop_timeout_s: float = 4.0  # Win+D -> the desktop is in front
     stable_timeout_s: float = 3.0  # screenshot stops changing (animations finished)

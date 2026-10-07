@@ -47,7 +47,23 @@ kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
 kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
 kernel32.CloseHandle.restype = wintypes.BOOL
 
+user32.GetDlgCtrlID.argtypes = [wintypes.HWND]
+user32.GetDlgCtrlID.restype = ctypes.c_int
+user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+user32.GetAncestor.restype = wintypes.HWND
+user32.SendMessageTimeoutW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM,
+                                       wintypes.UINT, wintypes.UINT, ctypes.POINTER(ctypes.c_size_t)]
+user32.SendMessageTimeoutW.restype = ctypes.c_ssize_t
+_WNDENUMCHILDPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+user32.EnumChildWindows.argtypes = [wintypes.HWND, _WNDENUMCHILDPROC, wintypes.LPARAM]
+user32.EnumChildWindows.restype = wintypes.BOOL
+
 WM_CLOSE = 0x0010
+WM_GETTEXT = 0x000D
+WM_GETTEXTLENGTH = 0x000E
+SMTO_ABORTIFHUNG = 0x0002
+GA_ROOT = 2
+FILENAME_EDIT_ID = 1001  # the "File name" edit control of the standard Open/Save dialogs
 SW_RESTORE = 9
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
@@ -128,6 +144,62 @@ def bring_to_front(hwnd: int) -> bool:
         user32.ShowWindow(hwnd, SW_RESTORE)
     user32.SetForegroundWindow(hwnd)
     return foreground_hwnd() == int(hwnd)
+
+
+def is_foreground_within(hwnd: int) -> bool:
+    """True when `hwnd` (or a window it owns/contains) has the keyboard focus."""
+    fg = foreground_hwnd()
+    return bool(fg) and (fg == int(hwnd) or int(user32.GetAncestor(fg, GA_ROOT) or 0) == int(hwnd))
+
+
+def _control_text(hwnd, timeout_ms: int = 1000) -> str | None:
+    """WM_GETTEXT with a timeout, so a hung dialog cannot freeze us. None if the control did not answer."""
+    length = ctypes.c_size_t(0)
+    if not user32.SendMessageTimeoutW(hwnd, WM_GETTEXTLENGTH, 0, 0, SMTO_ABORTIFHUNG, timeout_ms,
+                                      ctypes.byref(length)):
+        return None
+    buf = ctypes.create_unicode_buffer(length.value + 2)
+    got = ctypes.c_size_t(0)
+    if not user32.SendMessageTimeoutW(hwnd, WM_GETTEXT, len(buf), ctypes.cast(buf, ctypes.c_void_p).value,
+                                      SMTO_ABORTIFHUNG, timeout_ms, ctypes.byref(got)):
+        return None
+    return buf.value
+
+
+def _descendants(parent) -> list[tuple[int, str, int]]:
+    """(hwnd, class, control id) of every descendant window, depth-first as EnumChildWindows reports them."""
+    rows: list[tuple[int, str, int]] = []
+
+    @_WNDENUMCHILDPROC
+    def callback(hwnd, _lparam):
+        rows.append((int(hwnd), get_class(hwnd), int(user32.GetDlgCtrlID(hwnd))))
+        return True
+
+    user32.EnumChildWindows(parent, callback, 0)
+    return rows
+
+
+control_text = _control_text
+descendants = _descendants
+
+
+def filename_edit(dialog_hwnd: int) -> int | None:
+    """The File name edit box of a standard Open/Save dialog.
+
+    On current Windows it is an `Edit` (control id 1001) nested several levels deep inside a ComboBox,
+    so GetDlgItem on the dialog does not see it. Fall back to the first Edit if the id differs.
+    """
+    edits = [(h, cid) for h, cls, cid in _descendants(dialog_hwnd) if cls.lower() == "edit"]
+    for h, cid in edits:
+        if cid == FILENAME_EDIT_ID:
+            return h
+    return edits[0][0] if edits else None
+
+
+def get_dialog_filename(dialog_hwnd: int) -> str | None:
+    """Text currently in the File name box of a standard file dialog, or None if it cannot be read."""
+    edit = filename_edit(dialog_hwnd)
+    return _control_text(edit) if edit else None
 
 
 def request_close(hwnd: int) -> None:
