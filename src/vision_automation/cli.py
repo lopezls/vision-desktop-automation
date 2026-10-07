@@ -9,7 +9,7 @@ import anthropic
 import pyautogui
 from PIL import Image, ImageDraw
 
-from .config import CONFIG
+from .config import CONFIG, POST_COUNT
 from .llm import LLM, LLMError, MissingApiKeyError, make_client
 from .posts import PostsError
 from .workflow import WorkflowError
@@ -320,7 +320,7 @@ def _ground(args) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="vision-automation")
     parser.add_argument("-v", "--verbose", action="store_true")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -340,8 +340,8 @@ def main(argv: list[str] | None = None) -> int:
     pl.add_argument("--no-popup", action="store_true", help="skip the popup check")
     pl.add_argument("--ground", action="store_true", help="also ground each area/neighbor hint and save an overlay")
     rn = sub.add_parser("run", help="launch Notepad via its icon and save the posts (controls mouse and keyboard!)")
-    rn.add_argument("--posts", type=int, default=1,
-                    help="how many of the first posts to process (default 1; the assignment's full run is 10)")
+    rn.add_argument("--posts", type=int, default=POST_COUNT,
+                    help=f"how many of the first posts to process (default {POST_COUNT}, the assignment's full run)")
     rn.add_argument("--description", help="target description (default: the Notepad desktop icon)")
     rn.add_argument("--countdown", type=int, default=5, help="seconds before starting (default 5)")
     lc = sub.add_parser("locate", help="find the target icon and save an annotated screenshot (never clicks)")
@@ -364,7 +364,11 @@ def main(argv: list[str] | None = None) -> int:
     shot = sub.add_parser("screenshot", help="capture the screen to debug/; optionally mark a point")
     shot.add_argument("--delay", type=float, default=3.0, help="seconds to wait before capturing")
     shot.add_argument("--mark", help="x,y pixel to annotate with a marker (e.g. 960,540)")
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
