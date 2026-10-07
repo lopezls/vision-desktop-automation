@@ -7,9 +7,12 @@ crop-space coordinates back to the parent image (and ultimately the screen).
 from __future__ import annotations
 
 import ctypes
+import logging
+import time
 from dataclasses import dataclass
+from typing import Callable
 
-from PIL import Image, ImageGrab
+from PIL import Image, ImageChops, ImageGrab
 
 from .types import BBox, Point
 
@@ -56,10 +59,66 @@ def work_area(expected_size: tuple[int, int] | None = None) -> BBox | None:
     return BBox(rect.left, rect.top, rect.right, rect.bottom)
 
 
+def neutral_cursor_spot(screen: tuple[int, int], work: BBox | None) -> Point:
+    """A place to park the pointer where it cannot hover over anything that shows a tooltip or highlight.
+
+    Desktop icons can be anywhere, so the spot is on the taskbar band (the strip outside the work
+    area), a quarter of the way along it: on a default Windows 11 taskbar that is blank space between
+    the widget and the centered app icons. Without a taskbar band (e.g. auto-hide, where touching the
+    screen edge would pop it up) it is near the bottom-center, well clear of every edge and corner.
+    """
+    w, h = screen
+    if work is not None:
+        bands = {"bottom": h - work.y1, "top": work.y0, "left": work.x0, "right": w - work.x1}
+        side = max(bands, key=bands.get)
+        if bands[side] > 0:
+            if side == "bottom":
+                return Point(0.25 * w, (work.y1 + h) / 2)
+            if side == "top":
+                return Point(0.25 * w, work.y0 / 2)
+            if side == "left":
+                return Point(work.x0 / 2, 0.25 * h)
+            return Point((work.x1 + w) / 2, 0.25 * h)
+    return Point(0.5 * w, 0.9 * h)
+
+
 def capture() -> Image.Image:
     """Full primary-screen screenshot in physical pixels."""
     set_dpi_aware()
     return ImageGrab.grab().convert("RGB")
+
+
+log = logging.getLogger("vision_automation")
+
+
+def _changed_fraction(a: Image.Image, b: Image.Image) -> float:
+    """Fraction of the image covered by the bounding box of everything that differs between a and b."""
+    bbox = ImageChops.difference(a, b).getbbox()
+    if bbox is None:
+        return 0.0
+    return ((bbox[2] - bbox[0]) * (bbox[3] - bbox[1])) / (a.width * a.height)
+
+
+def wait_until_stable(timeout: float = 3.0, interval: float = 0.25, tolerance: float = 0.005,
+                      capture_fn: Callable[[], Image.Image] = capture,
+                      sleep: Callable[[float], None] = time.sleep,
+                      clock: Callable[[], float] = time.monotonic) -> Image.Image:
+    """Capture until two consecutive screenshots match (animations such as Win+D have finished).
+
+    Differences confined to less than `tolerance` of the screen (a ticking taskbar clock) count as
+    stable. On timeout the latest capture is returned with a warning.
+    """
+    deadline = clock() + timeout
+    prev = capture_fn()
+    while True:
+        sleep(interval)
+        cur = capture_fn()
+        if _changed_fraction(prev, cur) <= tolerance:
+            return cur
+        if clock() >= deadline:
+            log.warning("[screen] screen still changing after %.1fs; using the latest capture", timeout)
+            return cur
+        prev = cur
 
 
 # ---- crops -----------------------------------------------------------------------------

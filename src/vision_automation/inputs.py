@@ -38,6 +38,13 @@ def double_click(p: Point) -> None:
     pyautogui.doubleClick()
 
 
+def park_cursor(p: Point) -> None:
+    """Move the pointer out of the way (movement only: no click, no key). Used before screenshots so a
+    hover highlight or tooltip never covers the icon being searched for."""
+    x, y = _check_on_screen(p)
+    pyautogui.moveTo(x, y, duration=0.15)
+
+
 def move(p: Point) -> None:
     x, y = _check_on_screen(p)
     pyautogui.moveTo(x, y, duration=0.2)

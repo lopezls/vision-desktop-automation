@@ -29,7 +29,9 @@ class Config:
     dilate_factor: float = 3.0
     dilate_min_size: int = 240  # px
     dilate_max_ratio: float = 8.0
-    nms_iou: float = 0.5
+    # Candidates overlapping a better one by more than this IoU are merged away. 0.5 let three heavily
+    # overlapping left-column candidates through and crowded out the correct one in a real run.
+    nms_iou: float = 0.3
     # Tuned for 1080p from manual runs: a 190x150 crop grounded correctly, a 600x400 crop and the
     # full screenshot did not. The paper's 1280 is for 4K+ screens. Recursion keeps cropping until
     # the candidate's longer side is <= this, then grounds the target directly.
@@ -40,11 +42,19 @@ class Config:
     view_long_side: int = 800  # px: crops are upscaled so the model sees them at this longer side
     verify_crop_size: int = 300  # px (screen pixels): window around the predicted point for the verifier
     max_depth: int = 3
-    max_candidates_per_level: int = 3
     max_hints_per_level: int = 6  # area/neighbor hints grounded per level (1 grounder call each)
     dilate_skip_long_side: int = 600  # boxes at least this large are used as-is, not dilated
     stall_area_ratio: float = 0.9  # a candidate >= this fraction of its parent region is not progress
     max_llm_calls_per_find: int = 40
+
+    # --- desktop workflow (step 8): every wait polls for a condition, these are only the give-up times ---
+    launch_timeout_s: float = 20.0  # double-click -> a new Notepad window appears
+    dialog_timeout_s: float = 10.0  # Save As / overwrite confirmation dialogs
+    close_timeout_s: float = 10.0  # Notepad window disappears after closing
+    desktop_timeout_s: float = 4.0  # Win+D -> the desktop is in front
+    stable_timeout_s: float = 3.0  # screenshot stops changing (animations finished)
+    popup_dismissals: int = 2  # pop-ups the workflow will dismiss before one find, then it stops
+    park_settle_s: float = 0.4  # after parking the cursor: let hover tooltips fade (nothing to poll for)
 
 
 CONFIG = Config()

@@ -6,10 +6,13 @@ import sys
 from pathlib import Path
 
 import anthropic
+import pyautogui
 from PIL import Image, ImageDraw
 
 from .config import CONFIG
 from .llm import LLM, LLMError, MissingApiKeyError, make_client
+from .posts import PostsError
+from .workflow import WorkflowError
 
 
 def _check() -> int:
@@ -180,6 +183,45 @@ def _verify(args) -> int:
     return 0 if verdict.is_target else 1
 
 
+def _run(args) -> int:
+    """The real thing: takes over the mouse and keyboard. The failsafe (mouse to a screen corner) is on."""
+    import time
+    from dataclasses import replace
+
+    from .grounder import ClaudeGrounder
+    from .notepad import TARGET_DESCRIPTION, WindowsNotepad
+    from .paths import project_dir
+    from .planner import ClaudePlanner
+    from .posts import fetch_posts
+    from .search import Searcher
+    from .verifier import ClaudeVerifier
+    from .workflow import LiveScreen, Workflow
+
+    cfg = replace(CONFIG)
+    posts = fetch_posts(args.posts)  # fail early, before touching the screen
+    out_dir = project_dir()
+    print(f"Fetched {len(posts)} post(s): ids {[p.id for p in posts]}. Saving to {out_dir}")
+
+    llm = LLM(cfg=cfg)
+    searcher = Searcher(ClaudePlanner(llm), ClaudeGrounder(llm), ClaudeVerifier(llm, cfg), llm, cfg)
+    workflow = Workflow(searcher, LiveScreen(cfg), WindowsNotepad(cfg), out_dir,
+                        args.description or TARGET_DESCRIPTION, cfg)
+
+    print("The program will now control your mouse and keyboard.")
+    print("To ABORT at any time: move the mouse into any corner of the screen.")
+    for n in range(args.countdown, 0, -1):
+        print(f"  starting in {n}...")
+        time.sleep(1)
+
+    t0 = time.perf_counter()
+    results = workflow.run(posts)
+    print(f"\nDone: {len(results)} post(s) saved in {time.perf_counter() - t0:.0f}s")
+    for r in results:
+        print(f"  post {r.post_id}: {r.path.name}  click point ({r.click_point.x:.0f}, {r.click_point.y:.0f})  "
+              f"{r.search_calls} search calls  {r.seconds}s")
+    return 0
+
+
 def _locate(args) -> int:
     """Dry run: find the target and save an annotated screenshot. Never clicks or types."""
     import time
@@ -188,12 +230,12 @@ def _locate(args) -> int:
     from .annotate import annotate_result, save_image
     from .config import ANNOTATED_DIR
     from .grounder import ClaudeGrounder
-    from .llm import stage_times, timed
+    from .llm import stage_times
     from .notepad import TARGET_DESCRIPTION
     from .planner import ClaudePlanner
-    from .screen import capture
     from .search import GroundingError, PopupBlocked, Searcher
     from .verifier import ClaudeVerifier
+    from .workflow import LiveScreen
 
     overrides = {k: v for k, v in {
         "direct_ground_size": args.direct_size, "max_depth": args.max_depth,
@@ -207,8 +249,7 @@ def _locate(args) -> int:
     else:
         print(f"Capturing screen in {args.delay:g}s (show the desktop now)...")
         time.sleep(args.delay)
-        with timed("capture"):
-            img = capture()
+        img = LiveScreen(cfg).fresh_screenshot()  # parks the pointer (movement only) so no tooltip covers an icon
         print(f"Captured {img.width}x{img.height}")
 
     llm = LLM(cfg=cfg)
@@ -298,6 +339,11 @@ def main(argv: list[str] | None = None) -> int:
     pl.add_argument("--zoom", type=int, help="with --crop: resize the crop's longer side to N px")
     pl.add_argument("--no-popup", action="store_true", help="skip the popup check")
     pl.add_argument("--ground", action="store_true", help="also ground each area/neighbor hint and save an overlay")
+    rn = sub.add_parser("run", help="launch Notepad via its icon and save the posts (controls mouse and keyboard!)")
+    rn.add_argument("--posts", type=int, default=1,
+                    help="how many of the first posts to process (default 1; the assignment's full run is 10)")
+    rn.add_argument("--description", help="target description (default: the Notepad desktop icon)")
+    rn.add_argument("--countdown", type=int, default=5, help="seconds before starting (default 5)")
     lc = sub.add_parser("locate", help="find the target icon and save an annotated screenshot (never clicks)")
     lc.add_argument("--description", help="target description (default: the Notepad desktop icon)")
     lc.add_argument("--image", help="path to a saved screenshot (default: capture the screen)")
@@ -328,6 +374,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.cmd == "check":
             return _check()
+        if args.cmd == "run":
+            return _run(args)
         if args.cmd == "locate":
             return _locate(args)
         if args.cmd == "verify":
@@ -341,4 +389,19 @@ def main(argv: list[str] | None = None) -> int:
     except (MissingApiKeyError, LLMError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
+    except pyautogui.FailSafeException:
+        print("\nABORTED: the mouse reached a screen corner (failsafe). Nothing further was done.", file=sys.stderr)
+        return 130
+    except KeyboardInterrupt:
+        print("\nABORTED by Ctrl+C.", file=sys.stderr)
+        return 130
+    except PostsError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    except WorkflowError as e:
+        print(f"\nSTOPPED: {e}", file=sys.stderr)
+        if e.debug_image:
+            print(f"Screenshot at the failure: {e.debug_image}", file=sys.stderr)
+        print("The run stopped at the first failure; nothing further was clicked or typed.", file=sys.stderr)
+        return 1
     return 0

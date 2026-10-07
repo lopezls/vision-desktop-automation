@@ -293,16 +293,25 @@ class Searcher:
             ctx.trace.add("level_failed", depth=depth, region=_b(region), reason="every candidate was in the taskbar band")
             return None
         boxes = kept_boxes
-        scores = score_candidates(areas, boxes, cfg.sigma)
-        kept = nms(areas, scores, cfg.nms_iou)
+        scores = score_candidates(areas, boxes, cfg.sigma)  # every grounded box votes, stalled candidates included
+
+        # Stall guard BEFORE NMS: a candidate that is not meaningfully smaller than its region cannot be
+        # searched, so it must not get to suppress candidates that can be. (A wide tooltip hint once made a
+        # region-sized candidate the NMS winner, which then got skipped, leaving nothing to search.)
+        usable: list[tuple[BBox, float]] = []
+        for area, score in zip(areas, scores):
+            if area.area >= cfg.stall_area_ratio * region.area:
+                ctx.trace.add("candidate_skipped", depth=depth, area=_b(area), reason="stalled: not smaller than its parent")
+            else:
+                usable.append((area, score))
+        kept = nms([a for a, _ in usable], [s for _, s in usable], cfg.nms_iou)
         ctx.trace.add("candidates", depth=depth,
                       all=[{"area": _b(a), "score": round(s, 3)} for a, s in zip(areas, scores)],
                       after_nms=[{"area": _b(a), "score": round(s, 3)} for a, s in kept])
 
-        for area, score in kept[: cfg.max_candidates_per_level]:
-            if area.area >= cfg.stall_area_ratio * region.area:
-                ctx.trace.add("candidate_skipped", depth=depth, area=_b(area), reason="stalled: not smaller than its parent")
-                continue
+        # Every candidate that survives NMS is tried, best first (Algorithm 1 has no per-level cap).
+        # What bounds the search is the per-find call cap and the stall/revisit guards, not a count.
+        for area, score in kept:
             if any(iou(area, v) > REVISIT_IOU for v in st.visited):
                 ctx.trace.add("candidate_skipped", depth=depth, area=_b(area), reason="already searched")
                 continue
