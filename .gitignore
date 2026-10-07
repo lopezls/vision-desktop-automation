@@ -1,0 +1,23 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Secrets and run output
+.env
+.env.*
+debug/
+*.log
+.pytest_cache/
+
+desktop.ini
+
+desktop.ini
+
+assignment.md
